@@ -4,6 +4,8 @@ import spidev
 import time
 import RPi.GPIO as GPIO
 
+import st7036_codec
+
 COMMAND_CLEAR = 0b00000001
 COMMAND_HOME = 0b00000010
 COMMAND_SCROLL = 0b00010000
@@ -179,8 +181,8 @@ class st7036():
         """
         GPIO.output(self.register_select_pin, GPIO.HIGH)
 
-        for i in [ord(char) for char in value]:
-            self.spi.xfer([i])
+        for byte in value.encode('st7036', errors='replace'):
+            self.spi.xfer([byte])
             time.sleep(0.00005)
 
     def create_animation(self, anim_pos, anim_map, frame_rate):

@@ -286,6 +286,9 @@ decoding_map = { 0b00000000: USER_DEFINED_CHARACTER_0,
 
 encoding_map = codecs.make_encoding_map(decoding_map)
 
+# Add compatibility with existing code using user defined characters
+encoding_map.update({ code: code for code in range(0, 7) })
+
 class Codec(codecs.Codec):
     def encode(self, input, errors='strict'):
         return codecs.charmap_encode(input, errors, encoding_map)
