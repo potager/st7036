@@ -76,17 +76,17 @@ PIXEL_WIDTH = 0.47
 PIXEL_HEIGHT = 0.43
 PIXEL_HORIZONTAL_SPACING = 0.03
 PIXEL_VERTICAL_SPACING = 0.03
-    
+
 
 characters = []
 character_y = 0
-for character_row in reversed(range(0, CHARACTER_ROWS)):
+for character_row in range(0, CHARACTER_ROWS):
     character_x = 0
     for character_column in range(0, CHARACTER_COLUMNS):
         ddram_address = character_row * 0x10 + character_column
         pixels = []
         pixel_y = 0
-        for pixel_row in reversed(range(0, PIXEL_ROWS)):
+        for pixel_row in range(0, PIXEL_ROWS):
             pixel_x = 0
             for pixel_column in reversed(range(0, PIXEL_COLUMNS)):
                 pixels.append(PIXEL_TEMPLATE.format(ddram_address=ddram_address, row=pixel_row, column=pixel_column, x=pixel_x, y=pixel_y, width=PIXEL_WIDTH, height=PIXEL_HEIGHT))
