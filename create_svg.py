@@ -8,15 +8,21 @@ STYLE = """
       stroke:none;
     }
     #background {
-      fill: #d9d9d9;
+      fill: url(#backlight);
     }
-    .pixel-background {
-      fill: #d9518f;
-      fill-opacity: 0;
+    .character-background {
+      fill: #ccc;
+      fill-opacity: 0.1;
     }
     .pixel {
       fill: #000000;
-      fill-opacity: 0.1;
+      fill-opacity: 0;
+    }
+    .pixel-on {
+      fill-opacity: 1;
+    }
+    .pixel-off {
+      fill-opacity: 0.0;
     }
 """
 
@@ -24,10 +30,17 @@ SCRIPT = """
     var sheet = document.styleSheets[0];
     var displayOffRuleIndex = 0;
     var contrastRuleIndex = 0;
+    var backlightLedRuleIndices = [0, 0, 0, 0, 0, 0];
 
     function setPixel(x_hex, y_hex, on) {
       var pixel_id = 'pixel-' + x_hex + '-' + y_hex;
-      document.getElementById(pixel_id).style.fillOpacity = on ? 0.9 : 0.1;
+      var pixel = document.getElementById(pixel_id);
+      // There's sometimes a race before everything is set up, so
+      // let's not crash in that case
+      if (pixel.classList) {
+        pixel.classList.toggle('pixel-on', on);
+        pixel.classList.toggle('pixel-off', !on);
+      }
     }
     function turnDisplayOn() {
       if (displayOffRuleIndex) {
@@ -41,12 +54,25 @@ SCRIPT = """
       }
     }
     function setContrast(opacity) {
-      if (contrastRuleIndex) {
+      if (!contrastRuleIndex) {
+        contrastRuleIndex = sheet.cssRules.length;
+      } else {
         sheet.deleteRule(contrastRuleIndex);
       }
-      contrastRuleIndex = sheet.cssRules.length;
-      sheet.insertRule('.pixel-background { fill-opacity: ' + opacity + '; }', contrastRuleIndex);
+      on_opacity = 2 - (2 * opacity)
+      off_opacity = 1 - (2 * opacity)
+      sheet.insertRule('.pixel-on  { fill-opacity: ' + ((on_opacity > 1) ? 1 : on_opacity) + '; }', contrastRuleIndex);
+      sheet.insertRule('.pixel-off { fill-opacity: ' + ((off_opacity < 0) ? 0 : off_opacity) +  '; }', contrastRuleIndex);
     }
+    function setBacklightColor(ledIndex, red, green, blue) {
+      var color = 'rgb(' + red + ',' + green + ',' + blue + ')';
+      if (!backlightLedRuleIndices[ledIndex]) {
+        backlightLedRuleIndices[ledIndex] = sheet.cssRules.length;
+      } else {
+        sheet.deleteRule(backlightLedRuleIndices[ledIndex]);
+      }
+      sheet.insertRule('.backlight-led' + ledIndex + ' { stop-color: ' + color + '; }', backlightLedRuleIndices[ledIndex]);
+    } 
 """
 
 SVG_TEMPLATE = """<?xml version="1.0" encoding="UTF-8" standalone="no"?>
@@ -66,6 +92,18 @@ SVG_TEMPLATE = """<?xml version="1.0" encoding="UTF-8" standalone="no"?>
   <script type="text/javascript">
     <![CDATA[{script}]]>
   </script>
+  <defs>
+    <linearGradient id="backlight">
+      <stop class="backlight-led0" offset="0%" style="stop-opacity: 0.8" /> 
+      <stop class="backlight-led0" offset="5%" /> 
+      <stop class="backlight-led1" offset="23%" /> 
+      <stop class="backlight-led2" offset="41%" /> 
+      <stop class="backlight-led3" offset="59%" /> 
+      <stop class="backlight-led4" offset="77%" /> 
+      <stop class="backlight-led5" offset="95%" /> 
+      <stop class="backlight-led5" offset="100%" style="stop-opacity: 0.8" /> 
+    </linearGradient>
+  </defs>
   <g transform="scale({scale})">
   <g id="display" transform="translate(1.41,1.245)">
     <rect
@@ -85,7 +123,7 @@ SVG_TEMPLATE = """<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 
 CHARACTER_TEMPLATE = """
     <g id="ddram-0x{address:02x}" transform="translate({x:f},{y:f})">
-      <rect x="0" y="0" width="{width:f}" height="{height:f}" class="pixel-background" />
+      <rect x="0" y="0" width="{width:f}" height="{height:f}" class="character-background" />
       {pixels}
     </g>
 """

@@ -248,6 +248,8 @@ class GTKDisplay(Display, Gtk.Window):
         opacity = value / 0x40
         self.execute_script("setContrast({opacity});".format(opacity=opacity))
 
+    def set_backlight_color(self, led_index, red, green, blue):
+        self.execute_script("setBacklightColor({led_index}, {red:d}, {green}, {blue});".format(led_index=led_index, red=int(red), green=int(green), blue=int(blue)))
 
 class Controller(object):
     GPIO_LOW = 0

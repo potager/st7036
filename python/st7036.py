@@ -11,6 +11,10 @@ if os.getenv('ST7036_EMULATOR', False):
     controller = st7036.emulator.Controller(st7036.emulator.ST7036(display))
     spidev = st7036.emulator.spidev_adapter(controller)
     GPIO = st7036.emulator.GPIO_adapter(controller)
+
+    import math
+    import backlight_emulator as backlight
+    backlight.display = display
 else: 
     import spidev
     import RPi.GPIO as GPIO
@@ -276,44 +280,44 @@ if __name__ == "__main__":
     lcd.set_contrast(40)
     lcd.clear()
 
-    print(">> fill screen")
-    for i in range(48):
-        lcd.set_cursor_offset(i)
-        time.sleep(.05)
-        lcd.write(chr(i+65))
-        time.sleep(.02)
-
-    print(">> cycle character set")
-    for i in range(256 - 48 - 65):
-        lcd.set_cursor_offset(0x00)
-        lcd.write(bytes([(i + j + 65) for j in range(48)]).decode('st7036'))
-        time.sleep(.02)
-        lcd.clear()
-    lcd.clear()
-    
-    print(">> test contrast range")
-    lcd.set_cursor_offset(0x10)
-    lcd.write("test contrast")
-    for i in range(0x40):
-        lcd.set_contrast(i)
-        time.sleep(0.02)
-    for i in reversed(range(0x40)):
-        lcd.set_contrast(i)
-        time.sleep(0.02)
-        
-    lcd.set_contrast(40)
-    lcd.clear()
-
-    print(">> test set cursor position")
-    for i in range(50):
-        row = random.randint(0, 3 - 1)
-        column = random.randint(0, 16 - 1)
-
-        lcd.set_cursor_position(column, row)
-        lcd.write(chr(0b01101111))
-        time.sleep(.10)
-        lcd.set_cursor_position(column, row)
-        lcd.write(" ")
+#    print(">> fill screen")
+#    for i in range(48):
+#        lcd.set_cursor_offset(i)
+#        time.sleep(.05)
+#        lcd.write(chr(i+65))
+#        time.sleep(.02)
+#
+#    print(">> cycle character set")
+#    for i in range(256 - 48 - 65):
+#        lcd.set_cursor_offset(0x00)
+#        lcd.write(bytes([(i + j + 65) for j in range(48)]).decode('st7036'))
+#        time.sleep(.02)
+#        lcd.clear()
+#    lcd.clear()
+#    
+#    print(">> test contrast range")
+#    lcd.set_cursor_offset(0x10)
+#    lcd.write("test contrast")
+#    for i in range(0x40):
+#        lcd.set_contrast(i)
+#        time.sleep(0.02)
+#    for i in reversed(range(0x40)):
+#        lcd.set_contrast(i)
+#        time.sleep(0.02)
+#        
+#    lcd.set_contrast(40)
+#    lcd.clear()
+#
+#    print(">> test set cursor position")
+#    for i in range(50):
+#        row = random.randint(0, 3 - 1)
+#        column = random.randint(0, 16 - 1)
+#
+#        lcd.set_cursor_position(column, row)
+#        lcd.write(chr(0b01101111))
+#        time.sleep(.10)
+#        lcd.set_cursor_position(column, row)
+#        lcd.write(" ")
 
     print(">> demo")
 
@@ -355,12 +359,12 @@ if __name__ == "__main__":
 
     text = "  pimoroni ftw  "
 
-    for i in range(180):
+    for i in range(360):
         x += 3
         x %= 360
 
-        #backlight.sweep((360.0 - x) / 360.0)
-        #backlight.set_graph(abs(math.sin(x / 100.0)))
+        backlight.sweep((360.0 - x) / 360.0)
+        backlight.set_graph(abs(math.sin(x / 100.0)))
 
         if x == 0:
             lcd.set_cursor_position(0, 1)
