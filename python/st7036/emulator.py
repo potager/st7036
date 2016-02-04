@@ -146,6 +146,109 @@ class ThreeLinesCursesDisplay(Display):
     def turn_display_off(self):
         self.switch_display(on=False)
 
+
+from gi.repository import GLib
+from gi.repository import Gtk
+from gi.repository import WebKit
+
+
+def glib_defer(f):
+    def wrapper(*args, **kwargs):
+        GLib.idle_add(f, *args, **kwargs)
+    return wrapper
+
+
+class GTKDisplay(Display, Gtk.Window):
+    def __init__(self):
+        super().__init__()
+        self._display_on = True
+        self._scripts = []
+        self._scripts_lock = threading.Lock()
+        self._scripts_condition = threading.Condition()
+        self.init_ui()
+        threading.Thread(target=self.run_main_loop).start()
+        t = threading.Thread(target=self.run_scripts_loop)
+        t.daemon = True
+        t.start()
+
+    def run_main_loop(self):
+        Gtk.main()
+
+    @glib_defer
+    def init_ui(self):
+        vbox = Gtk.VBox()
+
+        self.display = WebKit.WebView()
+        #self.display.load_html_string('<img src="file:///home/lunar/Documents/Misc/TouPi/st7036/lcd.svg" width="612" height="164" />', 'file:///')
+        self.display.load_uri('file:///home/lunar/Documents/Misc/TouPi/st7036/lcd.svg')
+        vbox.pack_start(self.display, expand=True, fill=True, padding=0)
+
+        self.add(vbox)
+
+        self.set_title("ST7036 emulator")
+        self.resize(420, 120)
+        self.set_position(Gtk.WindowPosition.CENTER)
+        self.connect("delete-event", self.handle_quit)
+        self.show_all()
+
+    def handle_quit(self, *args):
+        Gtk.main_quit()
+
+    @property
+    def lines(self):
+        return 3
+
+    @property
+    def columns(self):
+        return 16
+
+    def run_scripts_loop(self):
+        with self._scripts_condition:
+            while True:
+                self._scripts_lock.acquire()
+                if not self._scripts:
+                    self._scripts_lock.release()
+                    self._scripts_condition.wait()
+                    time.sleep(.001)
+                    self._scripts_lock.acquire()
+                self.run_script('\n'.join(self._scripts))
+                self._scripts.clear()
+                self._scripts_lock.release()
+
+    def execute_script(self, script):
+        with self._scripts_condition:
+            with self._scripts_lock:
+                self._scripts.append(script)
+            self._scripts_condition.notify()
+
+    @glib_defer
+    def run_script(self, script):
+        self.display.execute_script(script)
+
+    def set_pixel(self, x, y, on=True):
+        if on:
+            value = 'true'
+        else:
+            value = 'false'
+        self.execute_script("setPixel('0x{x:02x}', '0x{y:02x}', {value});".format(x=x, y=y, value=value))
+
+    def turn_display_on(self):
+        if self._display_on:
+            return
+        self.execute_script("turnDisplayOn();")
+        self._display_enabled = True
+
+    def turn_display_off(self):
+        if not self._display_on:
+            return
+        self.execute_script("turnDisplayOff();")
+        self._display_enabled = False
+
+    def change_contrast(self, value):
+        opacity = value / 0x40
+        self.execute_script("setContrast({opacity});".format(opacity=opacity))
+
+
 class Controller(object):
     GPIO_LOW = 0
     GPIO_HIGH = 1
@@ -290,6 +393,7 @@ class ST7036(object):
         else: # instructions
             if mode == 'r':
                 return self.read_busy_flag_and_address
+
             if not self._extended_mode:
                 if (b >> 7) & 1: return self.set_ddram_address
                 if (b >> 6) & 1: return self.set_cgram_address
@@ -305,10 +409,10 @@ class ST7036(object):
                     if self._instruction_set == 0:
                         return self.set_cgram_address
                     elif self._instruction_set == 1:
-                        if (b | 0b00001111) & 0b01001111: return self.set_icon_address
-                        if (b | 0b00001111) & 0b01011111: return self.set_power_icon_contrast_high
-                        if (b | 0b00001111) & 0b01101111: return self.control_follower
-                        if (b | 0b00001111) & 0b01111111: return self.set_contrast_low
+                        if (b >> 4) & 0b111 == 0b111: return self.set_contrast_low
+                        if (b >> 4) & 0b110 == 0b110: return self.control_follower
+                        if (b >> 4) & 0b101 == 0b101: return self.set_power_icon_contrast_high
+                        if (b >> 4) & 0b100 == 0b100: return self.set_icon_address
                     elif self._instruction_set == 2:
                         raise ValueError('reserved instruction')
                     else:
@@ -569,7 +673,7 @@ class ST7036(object):
 
     @property
     def contrast(self):
-        return self._icon_visible
+        return self._contrast
 
     @contrast.setter
     def contrast(self, value):
@@ -579,11 +683,11 @@ class ST7036(object):
     def set_power_icon_contrast_high(self, db):
         self.icon_visible = db & 0b1000 == 0b1000
         self._booster_on = db & 0b100 == 0b100
-        self.contrast |= (db & 0b11) << 4
+        self.contrast = (db & 0b11) << 4 | (self.contrast & 0b001111)
 
     def control_follower(self, db):
         self._follower_on = db & 0b1000 == 0b1000
         self._v0_amplified_ration = db & 0b111
 
     def set_contrast_low(self, db):
-        self.contrast |= db & 0b1111
+        self.contrast = (self.contrast & 0b110000) | (db & 0b1111)

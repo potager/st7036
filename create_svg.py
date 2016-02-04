@@ -12,10 +12,40 @@ STYLE = """
     }
     .pixel-background {
       fill: #d9518f;
+      fill-opacity: 0;
     }
     .pixel {
       fill: #000000;
-      fill-opacity: 0;
+      fill-opacity: 0.1;
+    }
+"""
+
+SCRIPT = """
+    var sheet = document.styleSheets[0];
+    var displayOffRuleIndex = 0;
+    var contrastRuleIndex = 0;
+
+    function setPixel(x_hex, y_hex, on) {
+      var pixel_id = 'pixel-' + x_hex + '-' + y_hex;
+      document.getElementById(pixel_id).style.fillOpacity = on ? 0.9 : 0.1;
+    }
+    function turnDisplayOn() {
+      if (displayOffRuleIndex) {
+        sheet.deleteRule(displayOffRuleIndex);
+      }
+    }
+    function turnDisplayOff() {
+      if (!displayOffRuleIndex) {
+        displayOffRuleIndex = sheet.cssRules.length;
+        sheet.insertRule('.pixel { visible: false }', displayOffRuleIndex);
+      }
+    }
+    function setContrast(opacity) {
+      if (contrastRuleIndex) {
+        sheet.deleteRule(contrastRuleIndex);
+      }
+      contrastRuleIndex = sheet.cssRules.length;
+      sheet.insertRule('.pixel-background { fill-opacity: ' + opacity + '; }', contrastRuleIndex);
     }
 """
 
@@ -28,9 +58,14 @@ SVG_TEMPLATE = """<?xml version="1.0" encoding="UTF-8" standalone="no"?>
    id="lcd"
    version="1.1">
    >
-  <style type="text/css">
-    {style}
+  <style title="default" type="text/css">
+    <![CDATA[{style}]]>
   </style>
+  <style title="display-on-off" type="text/css"></style>
+  <style title="contrast" type="text/css"></style>
+  <script type="text/javascript">
+    <![CDATA[{script}]]>
+  </script>
   <g transform="scale({scale})">
   <g id="display" transform="translate(1.41,1.245)">
     <rect
@@ -56,8 +91,8 @@ CHARACTER_TEMPLATE = """
 """
 
 PIXEL_TEMPLATE = """
-      <rect id="ddram-0x{ddram_address:02x}-pixel-0x{row:02x}-b{column:x}"
-            x="{x:f}" y="{y:f}" width="{width:f}" height="{height:f}" 
+      <rect id="pixel-0x{column:02x}-0x{row:02x}"
+            x="{x:f}" y="{y:f}" width="{width:f}" height="{height:f}"
             class="pixel" />
 """
 
@@ -80,19 +115,27 @@ PIXEL_VERTICAL_SPACING = 0.03
 
 characters = []
 character_y = 0
+pos_pixel_y = 0
 for character_row in range(0, CHARACTER_ROWS):
     character_x = 0
+    pos_pixel_x = 0
     for character_column in range(0, CHARACTER_COLUMNS):
         ddram_address = character_row * 0x10 + character_column
         pixels = []
         pixel_y = 0
         for pixel_row in range(0, PIXEL_ROWS):
             pixel_x = 0
-            for pixel_column in reversed(range(0, PIXEL_COLUMNS)):
-                pixels.append(PIXEL_TEMPLATE.format(ddram_address=ddram_address, row=pixel_row, column=pixel_column, x=pixel_x, y=pixel_y, width=PIXEL_WIDTH, height=PIXEL_HEIGHT))
+            for pixel_column in range(0, PIXEL_COLUMNS):
+                pixels.append(PIXEL_TEMPLATE.format(row=pos_pixel_y, column=pos_pixel_x, x=pixel_x, y=pixel_y, width=PIXEL_WIDTH, height=PIXEL_HEIGHT))
                 pixel_x += PIXEL_WIDTH + PIXEL_HORIZONTAL_SPACING
+                pos_pixel_x += 1
             pixel_y += PIXEL_HEIGHT + PIXEL_VERTICAL_SPACING
+            pos_pixel_x -= PIXEL_COLUMNS
+            pos_pixel_y += 1
         characters.append(CHARACTER_TEMPLATE.format(address=ddram_address, x=character_x, y=character_y, width=CHARACTER_WIDTH, height=CHARACTER_HEIGHT, pixels=''.join(pixels)))
         character_x += CHARACTER_WIDTH + CHARACTER_HORIZONTAL_SPACING
+        pos_pixel_x += PIXEL_COLUMNS
+        pos_pixel_y -= PIXEL_ROWS
     character_y += CHARACTER_HEIGHT + CHARACTER_VERTICAL_SPACING
-print(SVG_TEMPLATE.format(style=STYLE, scale=SCALE, width=SCALE * DISPLAY_WIDTH, height=SCALE * DISPLAY_HEIGHT, characters=''.join(characters)))
+    pos_pixel_y += PIXEL_ROWS
+print(SVG_TEMPLATE.format(style=STYLE, script=SCRIPT, scale=SCALE, width=SCALE * DISPLAY_WIDTH, height=SCALE * DISPLAY_HEIGHT, characters=''.join(characters)))

@@ -6,7 +6,8 @@ import time
 if os.getenv('ST7036_EMULATOR', False):
     import st7036.emulator
 
-    display = st7036.emulator.ThreeLinesCursesDisplay()
+    #display = st7036.emulator.ThreeLinesCursesDisplay()
+    display = st7036.emulator.GTKDisplay()
     controller = st7036.emulator.Controller(st7036.emulator.ST7036(display))
     spidev = st7036.emulator.spidev_adapter(controller)
     GPIO = st7036.emulator.GPIO_adapter(controller)
@@ -289,7 +290,7 @@ if __name__ == "__main__":
         time.sleep(.02)
         lcd.clear()
     lcd.clear()
-
+    
     print(">> test contrast range")
     lcd.set_cursor_offset(0x10)
     lcd.write("test contrast")
