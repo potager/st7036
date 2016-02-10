@@ -4,7 +4,6 @@ import sys
 
 STYLE = """
     rect {
-      fill-opacity: 1;
       stroke:none;
     }
     #background {
@@ -24,12 +23,15 @@ STYLE = """
     .pixel-off {
       fill-opacity: 0.0;
     }
+    .button {
+      fill-opacity: 0.3;
+    }
 """
 
 SCRIPT = """
     var sheet = document.styleSheets[0];
-    var displayOffRuleIndex = 0;
-    var contrastRuleIndex = 0;
+    var displayOffRuleIndex;
+    var contrastRuleIndices;
     var backlightLedRuleIndices = [0, 0, 0, 0, 0, 0];
 
     function setPixel(x_hex, y_hex, on) {
@@ -37,7 +39,7 @@ SCRIPT = """
       var pixel = document.getElementById(pixel_id);
       // There's sometimes a race before everything is set up, so
       // let's not crash in that case
-      if (pixel.classList) {
+      if (pixel && pixel.classList) {
         pixel.classList.toggle('pixel-on', on);
         pixel.classList.toggle('pixel-off', !on);
       }
@@ -54,15 +56,16 @@ SCRIPT = """
       }
     }
     function setContrast(opacity) {
-      if (!contrastRuleIndex) {
-        contrastRuleIndex = sheet.cssRules.length;
+      if (!contrastRuleIndices) {
+        contrastRuleIndices = [sheet.cssRules.length, sheet.cssRules.length + 1];
       } else {
-        sheet.deleteRule(contrastRuleIndex);
+        sheet.deleteRule(contrastRuleIndices[1]);
+        sheet.deleteRule(contrastRuleIndices[0]);
       }
       on_opacity = 2 - (2 * opacity)
       off_opacity = 1 - (2 * opacity)
-      sheet.insertRule('.pixel-on  { fill-opacity: ' + ((on_opacity > 1) ? 1 : on_opacity) + '; }', contrastRuleIndex);
-      sheet.insertRule('.pixel-off { fill-opacity: ' + ((off_opacity < 0) ? 0 : off_opacity) +  '; }', contrastRuleIndex);
+      sheet.insertRule('.pixel-on  { fill-opacity: ' + ((on_opacity > 1) ? 1 : on_opacity) + '; }', contrastRuleIndices[0]);
+      sheet.insertRule('.pixel-off { fill-opacity: ' + ((off_opacity < 0) ? 0 : off_opacity) +  '; }', contrastRuleIndices[1]);
     }
     function setBacklightColor(ledIndex, red, green, blue) {
       var color = 'rgb(' + red + ',' + green + ',' + blue + ')';
@@ -73,14 +76,23 @@ SCRIPT = """
       }
       sheet.insertRule('.backlight-led' + ledIndex + ' { stop-color: ' + color + '; }', backlightLedRuleIndices[ledIndex]);
     } 
+
+    function forwardMouseDown(button) {
+      window.location = 'event://mouse-down/' + button;
+    }
+    function forwardMouseUp(button) {
+      window.location = 'event://mouse-up/' + button;
+    }
+    
 """
 
 SVG_TEMPLATE = """<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <svg
    xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
    xmlns="http://www.w3.org/2000/svg"
-   width="{width:f}"
-   height="{height:f}"
+   width="628"
+   height="547"
    id="lcd"
    version="1.1">
    >
@@ -104,11 +116,25 @@ SVG_TEMPLATE = """<?xml version="1.0" encoding="UTF-8" standalone="no"?>
       <stop class="backlight-led5" offset="100%" style="stop-opacity: 0.8" /> 
     </linearGradient>
   </defs>
-  <g transform="scale({scale})">
+  <image x="0" y="0" width="628" height="546" xlink:href="background.jpg" />
+  <rect id="button-cancel" class="button" x="4"   y="88"  width="36"  height="100" onmousedown="forwardMouseDown('cancel')" onmouseup="forwardMouseUp('cancel')"/>
+  <rect id="button-up"     class="button" x="4"   y="220" width="36"  height="100" onmousedown="forwardMouseDown('up')"     onmouseup="forwardMouseUp('up')"    />
+  <rect id="button-down"   class="button" x="4"   y="330" width="36"  height="100" onmousedown="forwardMouseDown('down')"   onmouseup="forwardMouseUp('down')"  />
+  <rect id="button-left"   class="button" x="114" y="488" width="112" height="56"  onmousedown="forwardMouseDown('left')"   onmouseup="forwardMouseUp('left')"  />
+  <rect id="button-enter"  class="button" x="258" y="488" width="112" height="56"  onmousedown="forwardMouseDown('enter')"  onmouseup="forwardMouseUp('enter')" />
+  <rect id="button-right"  class="button" x="404" y="488" width="112" height="56"  onmousedown="forwardMouseDown('right')"  onmouseup="forwardMouseUp('right')" />
+  <rect
+     style="fill-opacity: 1;"
+     id="background"
+     width="528"
+     height="171"
+     x="48"
+     y="234"/>
+  <g transform="translate(64, 249) scale({scale})">
   <g id="display" transform="translate(1.41,1.245)">
     <rect
-       style=""
-       id="background"
+       style="fill-opacity: 0;"
+       id="plane"
        width="48.18"
        height="12.01"
        x="0"
@@ -134,7 +160,7 @@ PIXEL_TEMPLATE = """
             class="pixel" />
 """
 
-SCALE = 12
+SCALE = 9.8
 DISPLAY_WIDTH = 51
 DISPLAY_HEIGHT = 14.5
 CHARACTER_ROWS = 3
@@ -176,4 +202,4 @@ for character_row in range(0, CHARACTER_ROWS):
         pos_pixel_y -= PIXEL_ROWS
     character_y += CHARACTER_HEIGHT + CHARACTER_VERTICAL_SPACING
     pos_pixel_y += PIXEL_ROWS
-print(SVG_TEMPLATE.format(style=STYLE, script=SCRIPT, scale=SCALE, width=SCALE * DISPLAY_WIDTH, height=SCALE * DISPLAY_HEIGHT, characters=''.join(characters)))
+print(SVG_TEMPLATE.format(style=STYLE, script=SCRIPT, scale=SCALE, characters=''.join(characters)))

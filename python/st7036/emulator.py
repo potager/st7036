@@ -1,6 +1,7 @@
 import sys
 import threading
 import time
+import itertools
 
 from character_map import CHARACTER_MAP
 
@@ -181,6 +182,7 @@ class GTKDisplay(Display, Gtk.Window):
         self.display = WebKit.WebView()
         #self.display.load_html_string('<img src="file:///home/lunar/Documents/Misc/TouPi/st7036/lcd.svg" width="612" height="164" />', 'file:///')
         self.display.load_uri('file:///home/lunar/Documents/Misc/TouPi/st7036/lcd.svg')
+        self.display.connect('navigation-requested', self._on_navigation_requested)
         vbox.pack_start(self.display, expand=True, fill=True, padding=0)
 
         self.add(vbox)
@@ -251,6 +253,22 @@ class GTKDisplay(Display, Gtk.Window):
     def set_backlight_color(self, led_index, red, green, blue):
         self.execute_script("setBacklightColor({led_index}, {red:d}, {green}, {blue});".format(led_index=led_index, red=int(red), green=int(green), blue=int(blue)))
 
+    def _on_navigation_requested(self, view, frame, req, data=None):
+        uri = req.get_uri()
+        print('nav req', uri)
+        if not uri.startswith('event://'):
+            return False
+        parts = uri.split('/')[2:]
+        event, args = parts[0], parts[1:]
+        getattr(self, '_handle_{}'.format(event.replace('-', '_')))(*args)
+        return True
+
+    def _handle_mouse_down(self, button):
+        print('button down', button)
+
+    def _handle_mouse_up(self, button):
+        print('button up', button)
+
 class Controller(object):
     GPIO_LOW = 0
     GPIO_HIGH = 1
@@ -273,10 +291,11 @@ class Controller(object):
         self._frame_thread.start()
 
     def switch_frame(self):
-        # XXX: implement blink every 64 frames
         while True:
-            self._display_event.set()
-            time.sleep(0.007) # approx. 7 ms
+            for i in range(0, 64):
+                self._display_event.set()
+                time.sleep(0.007) # approx. 7 ms
+            self._st7036.toggle_cursor_high_state()
 
     def display_frame(self):
         while True:
@@ -338,6 +357,7 @@ class ST7036(object):
         self._cgram = [0x00] * ST7036.CGRAM_SIZE
         self._icon_ram = [0x00] * (ST7036.ICON_RAM_SIZE // 5) # only 5 bits are used per row)
         self._cursor_offset = 0
+        self._cursor_high_state = False # for blink
 
         self._data_register = 0
         self._instruction_register = 0
@@ -450,6 +470,15 @@ class ST7036(object):
                 pixel_x += 1
             pixel_y += 1
 
+    def _draw_cursor(self, character_x, character_y, pixels):
+        if self._cursor_blink and self._cursor_high_state:
+            lines = [(character_y + 1) * ST7036.CHARACTER_HEIGHT - 1]
+        else:
+            lines = range(character_y * ST7036.CHARACTER_HEIGHT, (character_y + 1) * ST7036.CHARACTER_HEIGHT)
+        for pixel_y in lines:
+            for pixel_x in range(character_x * ST7036.CHARACTER_WIDTH, (character_x + 1) * ST7036.CHARACTER_WIDTH):
+                pixels[pixel_y][pixel_x] = True
+
     def _refresh_pixels(self, new_pixels):
         for y, line in enumerate(new_pixels):
             for x, pixel in enumerate(line):
@@ -462,7 +491,9 @@ class ST7036(object):
         # Initialize an empty framebuffer
         new_pixels = [[False] * (self._display.columns * ST7036.CHARACTER_WIDTH) for y in range(self._display.lines * ST7036.CHARACTER_HEIGHT)]
         for y in range(self._display.lines):
-            for x, ddram_address in enumerate(ST7036.DDRAM_LAYOUT[self._display.lines][y]):
+            ddram_addresses = itertools.cycle(ST7036.DDRAM_LAYOUT[self._display.lines][y])
+            print('shift: ', self._display_offset)
+            for x, ddram_address in enumerate(itertools.islice(ddram_addresses, self._display_offset, self._display.columns + self._display_offset)):
                 charcode = self._ddram[ddram_address]
                 # XXX: implement cgram switches
                 if charcode in range(0, ST7036.USER_DEFINED_CHARACTERS):
@@ -470,6 +501,8 @@ class ST7036(object):
                 else:
                     character = CHARACTER_MAP[charcode]
                 self._blit_character(x, y, new_pixels, character)
+                if self._cursor_on and self._address_counter == ddram_address:
+                    self._draw_cursor(x, y, new_pixels)
         self._refresh_pixels(new_pixels)
         self._pixels = new_pixels
         self._display_changed = False
@@ -500,7 +533,7 @@ class ST7036(object):
 
     def set_entry_mode(self, db):
         self._display_shift = db & 0b1 == 0b1
-        self._cursor_direction = -(db & 0b1) * -1
+        self._cursor_direction = 1 if (db >> 1 & 0b1) == 0b1 else -1
 
     @property
     def display_on(self):
@@ -530,6 +563,11 @@ class ST7036(object):
     def cursor_blink(self, value):
         self._cursor_blink = value
 
+    def toggle_cursor_high_state(self):
+        self._cursor_high_state = not self._cursor_high_state
+        if self._cursor_blink:
+            self._display_changed = True
+
     def switch_display_on_off(self, db):
         self.display_on = db & 0b100 == 0b100
         self.cursor_on = db & 0b10 == 0b10
@@ -541,14 +579,27 @@ class ST7036(object):
 
     @display_offset.setter
     def display_offset(self, value):
-        self._display_offset = value
+        self._display_offset = value % self._display.columns
         self._display_changed = True
 
+    def cursor_left(self):
+        self._write_command(COMMAND_SCROLL, 0)
+
+    def cursor_right(self):
+        self._write_command(COMMAND_SCROLL | (1 << 2), 0)
+
+    def shift_left(self):
+        self._write_command(COMMAND_SCROLL | (1 << 3), 0) # 0x18
+
+    def shift_right(self):
+        self._write_command(COMMAND_SCROLL | (1 << 3) | (1 << 2), 0) # 0x1C
+
     def shift_cursor_or_display(self, db):
-        if db & 0b1000 == 0b1000: # Screen
-            self._address_counter += -((db & 0b100) >> 2) * -1
-        else: # cursor
-            self.display_offset = -((db & 0b100) >> 2) * -1
+        shift = 1 if db >> 2 & 0b1 == 0b1 else -1
+        if db & 0b1000 == 0b1000: # shift display
+            self.display_offset -= shift
+        else: # shift cursor
+            self._address_counter += shift
 
     @property
     def n_bit(self):
@@ -640,6 +691,8 @@ class ST7036(object):
             self.set_icon_ram(self._address_counter, db)
         else:
             raise RuntimeError('Unknown selected memory')
+        if self._display_shift:
+            self.display_offset += self._cursor_direction
         self._address_counter += self._cursor_direction
 
     def read_data(self, db):
@@ -649,6 +702,7 @@ class ST7036(object):
             self._data_register = (self._busy_flag << 7) | self._cgram[self._address_counter]
         else:
             raise RuntimeError('Unknown selected memory')
+        # XXX: compare with hardware
         self._address_counter += self._cursor_direction
 
     def set_bias(self, db):
