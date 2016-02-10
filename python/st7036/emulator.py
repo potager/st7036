@@ -461,23 +461,22 @@ class ST7036(object):
         cgram_lines = self._cgram[cgram_base_address:cgram_base_address + ST7036.CHARACTER_HEIGHT]
         return [ [ '1' == c for c in "{:05b}".format(line) ] for line in cgram_lines ]
 
-    def _blit_character(self, character_x, character_y, pixels, character):
-        pixel_y = character_y * ST7036.CHARACTER_HEIGHT
+    def _blit_character(self, pixels, pixel_x, pixel_y, row_span, character):
         for line in character:
-            pixel_x = character_x * ST7036.CHARACTER_WIDTH
-            for pixel in line:
-                pixels[pixel_y][pixel_x] = pixel
-                pixel_x += 1
-            pixel_y += 1
+            for x_offset, pixel in enumerate(line):
+                for span in range(row_span):
+                    pixels[pixel_y + span][pixel_x + x_offset] = pixel
+            pixel_y += row_span
 
-    def _draw_cursor(self, character_x, character_y, pixels):
-        if self._cursor_blink and self._cursor_high_state:
-            lines = [(character_y + 1) * ST7036.CHARACTER_HEIGHT - 1]
-        else:
-            lines = range(character_y * ST7036.CHARACTER_HEIGHT, (character_y + 1) * ST7036.CHARACTER_HEIGHT)
-        for pixel_y in lines:
-            for pixel_x in range(character_x * ST7036.CHARACTER_WIDTH, (character_x + 1) * ST7036.CHARACTER_WIDTH):
-                pixels[pixel_y][pixel_x] = True
+    def _draw_cursor(self, pixels, pixel_x, pixel_y, row_span):
+        end_y = pixel_y + ST7036.CHARACTER_HEIGHT * row_span
+        if self._cursor_blink and not self._cursor_high_state:
+            pixel_y += end_y - row_span
+        while pixel_y < end_y:
+            for x_offset in range(ST7036.CHARACTER_WIDTH):
+                for span in range(row_span):
+                    pixels[pixel_y + span][pixel_x + x_offset] = True
+            pixel_y += row_span
 
     def _refresh_pixels(self, new_pixels):
         for y, line in enumerate(new_pixels):
@@ -490,19 +489,25 @@ class ST7036(object):
             return
         # Initialize an empty framebuffer
         new_pixels = [[False] * (self._display.columns * ST7036.CHARACTER_WIDTH) for y in range(self._display.lines * ST7036.CHARACTER_HEIGHT)]
+        pixel_y = 0
         for y in range(self._display.lines):
+            row_span = self.row_span[y]
+            if row_span == 0:
+                continue
             ddram_addresses = itertools.cycle(ST7036.DDRAM_LAYOUT[self._display.lines][y])
-            print('shift: ', self._display_offset)
-            for x, ddram_address in enumerate(itertools.islice(ddram_addresses, self._display_offset, self._display.columns + self._display_offset)):
+            pixel_x = 0
+            for ddram_address in itertools.islice(ddram_addresses, self._display_offset, self._display.columns + self._display_offset):
                 charcode = self._ddram[ddram_address]
                 # XXX: implement cgram switches
                 if charcode in range(0, ST7036.USER_DEFINED_CHARACTERS):
                     character = self._get_user_defined_character(charcode)
                 else:
                     character = CHARACTER_MAP[charcode]
-                self._blit_character(x, y, new_pixels, character)
+                self._blit_character(new_pixels, pixel_x, pixel_y, row_span, character)
                 if self._cursor_on and self._address_counter == ddram_address:
-                    self._draw_cursor(x, y, new_pixels)
+                    self._draw_cursor(new_pixels, pixel_x, pixel_y, row_span)
+                pixel_x += ST7036.CHARACTER_WIDTH
+            pixel_y += ST7036.CHARACTER_HEIGHT * row_span
         self._refresh_pixels(new_pixels)
         self._pixels = new_pixels
         self._display_changed = False
@@ -512,7 +517,7 @@ class ST7036(object):
         self._display_changed = True
 
     def set_cgram(self, offset, value):
-        self._cgram[offset] = value
+        self._cgram[offset] = value & 0b11111
         self._display_changed = True
 
     def set_icon_ram(self, offset, value):
@@ -634,6 +639,7 @@ class ST7036(object):
 
     @row_span.setter
     def row_span(self, value):
+        print('row span', value)
         self._row_span = value
         self._display_changed = True
 
@@ -642,28 +648,33 @@ class ST7036(object):
             self.row_span = [1] * self._display.lines
         else:
             if self._display.lines == 3:
+                print('lines', self._display.lines)
+                print('dh', self.dh_bit)
+                print('ud', self.ud_bit)
                 if not self.n_bit:
                     raise ValueError('N must be high when N3 is high')
                 if not self.dh_bit:
                     self.row_span = [1, 1, 1]
                 elif not self.ud_bit:
-                    self.row_span = [1, 2]
+                    self.row_span = [1, 2, 0]
                 else:
-                    self.row_span = [2, 1]
+                    self.row_span = [2, 1, 0]
             else:
                 if self.n_bit and self.dh_bit:
                     raise ValueError('N=high DH=high forbidden')
                 elif not self.dh_bit and self.n_bit:
                     self.row_span = [1] * self._display.lines
                 else:
-                    self.row_span = [2]
+                    self.row_span = [2, 0]
 
     def set_function(self, db):
         if db & 0b10000 == 0b10000: # DL bit
             self._data_length = 8
         else:
             self._data_length = 4
-        self.n_bit = db & 0b1000 == 0b1000 # N bit
+        self._n_bit = db & 0b1000 == 0b1000
+        self._dh_bit = db & 0b100 == 0b100
+        self.update_row_span()
         self._instruction_set = db & 0b11
         if self._instruction_set not in (0, 1, 2):
             raise ValueError('Reserved instruction set')
